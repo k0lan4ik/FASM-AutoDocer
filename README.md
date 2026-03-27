@@ -39,7 +39,7 @@ label_name:
 ## Сборка и запуск
 
 1. Сборка:
-`fasm autodocer.asm`
+`fasm main.asm`
 2. Генерация документации:
 `./autodocer <input_file.asm> <output_directory>`
 
