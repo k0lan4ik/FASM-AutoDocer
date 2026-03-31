@@ -14,4 +14,5 @@
 ; Body = Field Body | e
 ; Field = TOKEN_OPEN_TAG TagName TOKEN_CLOSE_TAG TagValue 
 ; TagName = TOKEN_IDEN
-; TagValue = TEXT_TAG | 
+; TagValue = TEXT_TAG |
+

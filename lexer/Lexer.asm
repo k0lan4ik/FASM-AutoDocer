@@ -57,6 +57,7 @@ endp
 ; .out:     eax -> Указазатель на структуру TOKEN выделенную с помощью HeapAlloc
 proc GetTypeToken uses esi, pStart
 locals
+    lPoint dd 0
     lState db 0 
 endl
     mov     esi, [pStart]

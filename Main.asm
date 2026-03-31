@@ -4,13 +4,15 @@ entry WinMain
 include 'win32w.inc'
 include 'Macros.inc'
 include 'lexer/Lexer.h.asm'
+include 'parser/Parser.h.asm'
 
 FILE_BUFFER equ 65536
 
 section '.code' code readable executable
 
     include 'lexer/Lexer.asm'
-    ;include 'parser/Parser.asm'
+    include 'parser/Parser.asm'
+    include 'generators/MDWiki.asm'
 
 WinMain:
     invoke  GetProcessHeap
@@ -21,118 +23,79 @@ WinMain:
 
     invoke  WriteConsoleW, [hOutput], msgStart, msgStart.length, 0, 0
 
-    invoke  CreateFileW, szTestFile, GENERIC_READ, OPEN_EXISTING, 0, OPEN_EXISTING, 0, 0
+    ; --- open input file ---
+    invoke  CreateFileW, szTestFile, GENERIC_READ, FILE_SHARE_READ, 0, \
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0
     cmp     eax, INVALID_HANDLE_VALUE
-    je      .Exit
-    mov     [hFile], eax 
+    je      .FileError
+    mov     [hFile], eax
 
-    invoke  GetFileSizeEx, [hFile], pLenght 
+    invoke  GetFileSizeEx, [hFile], pLenght
 
+    ; --- map entire file into memory ---
     invoke  CreateFileMappingW, [hFile], 0, PAGE_READONLY, 0, 0, 0
-    test    eax,  eax
-    jz      .Error
-    mov     edi, eax 
-
-.ReadLoop:    
-    mov     eax, dword [pLenght]
-    or      eax, dword [pLenght + 4]
-    jz      .EndRead   
-    
-    mov     esi, FILE_BUFFER
-    cmp     dword [pLenght + 4], 0
-    jnz     @F
-    cmp     dword [pLenght], esi
-    jge     @F
-    mov     esi, dword[pLenght]
-@@:
-    
-    invoke  MapViewOfFile, edi, FILE_MAP_READ, dword[cPos + 4], dword[cPos], esi
     test    eax, eax
-    jz      .Error
-    mov     ebx, eax
+    jz      .MapError
+    mov     [hMapping], eax
 
-    push    esi edi ebx
-    mov     esi, eax            
-    mov     edi, eax
-    add     edi, dword [pLenght] 
+    invoke  MapViewOfFile, [hMapping], FILE_MAP_READ, 0, 0, 0
+    test    eax, eax
+    jz      .MapError
+    mov     [pView], eax
 
-.LexerCycle:
-    cmp     esi, edi
-    jae     .LexerEnd
+    ; --- parse ---
+    invoke  WriteConsoleW, [hOutput], msgParsing, msgParsing.length, 0, 0
 
-    stdcall GetToken, esi       
-    mov     ebx, eax            
+    lea     eax, [docIR]
+    stdcall ParseDocument, [pView], dword [pLenght], eax
+    test    eax, eax
+    jz      .ParseFail
 
-    stdcall PrintTokenInfo, ebx 
+    lea     eax, [docIR]
+stdcall ParseDocument, [pView], dword [pLenght], eax
 
-    
-    mov     ecx, [ebx + Token.cRead]
-    test    ecx, ecx
-    jnz     @F
-    inc     ecx                
-@@:
-    add     esi, ecx
+; показать сколько блоков нашли
+mov     eax, [docIR + DocIR.blockCount]
+lea     edi, [charBuf]
+stdcall IntToStr, eax, edi
+invoke  WriteConsoleA, [hOutput], charBuf, 10, 0, 0
 
-  
-    invoke  HeapFree, [hHeap], 0, ebx
-    jmp     .LexerCycle
+    ; --- generate wiki ---
+    invoke  WriteConsoleW, [hOutput], msgGenerating, msgGenerating.length, 0, 0
 
-.LexerEnd:
-    pop     esi edi ebx
+    lea     eax, [docIR]
+    stdcall GenerateWiki, eax
+    test    eax, eax
+    jz      .GenFail
 
-    invoke  WriteConsoleA, [hOutput], ebx, esi, 0, 0
-    invoke  UnmapViewOfFile, ebx
-
-    sub     dword [pLenght], esi
-    sbb     dword [pLenght + 4], 0
-
-    add     dword [cPos], esi
-    adc     dword [cPos + 4], 0
-
-    jmp     .ReadLoop
-
-.EndRead:
-   
     invoke  WriteConsoleW, [hOutput], msgDone, msgDone.length, 0, 0
+    jmp     .Cleanup
+
+.GenFail:
+    invoke  WriteConsoleW, [hOutput], msgGenError, msgGenError.length, 0, 0
+    jmp     .Cleanup
+
+.ParseFail:
+    invoke  WriteConsoleW, [hOutput], msgParseError, msgParseError.length, 0, 0
+    jmp     .Cleanup
+
+.MapError:
     invoke  CloseHandle, [hFile]
-    invoke  ExitProcess, 0
-.Error:
-    
-    invoke  CloseHandle, [hFile]
-.Exit:  
+    jmp     .Exit
+
+.FileError:
     invoke  WriteConsoleW, [hOutput], msgFileError, msgFileError.length, 0, 0
     invoke  ExitProcess, 1
 
+.Cleanup:
+    lea     eax, [docIR]
+    stdcall FreeIR, eax
+    invoke  UnmapViewOfFile, [pView]
+    invoke  CloseHandle, [hMapping]
+    invoke  CloseHandle, [hFile]
+.Exit:
+    invoke  ExitProcess, 0
 
-proc PrintTokenInfo uses esi edi ebx, pToken
-    mov     ebx, [pToken]
-
-    invoke  WriteConsoleA, [hOutput], msgType, 9, 0, 0
-
-    movzx   eax, byte [ebx + Token.tType]
-    imul    eax, 4
-    mov     esi, [TokenNames + eax]
-    invoke  WriteConsoleA, [hOutput], esi, 10, 0, 0
-
-    invoke  WriteConsoleA, [hOutput], msgLen, 7, 0, 0
-
-    mov     eax, [ebx + Token.cRead]
-    lea     edi, [charBuf]
-    stdcall IntToStr, eax, edi
-    invoke  WriteConsoleA, [hOutput], edi, eax, 0, 0
-
-    invoke  WriteConsoleA, [hOutput], msgText, 10, 0, 0
-
-    mov     esi, [ebx + Token.pStart]
-    mov     ecx, [ebx + Token.cRead]
-    test    ecx, ecx
-    jz      .SkipText
-    invoke  WriteConsoleA, [hOutput], esi, ecx, 0, 0
-.SkipText:
-
-    invoke  WriteConsoleA, [hOutput], msgQuote, 1, 0, 0
-    ret
-endp
 
 proc IntToStr uses edi ebx, Val, pBuf
     mov     eax, [Val]
@@ -147,7 +110,7 @@ proc IntToStr uses edi ebx, Val, pBuf
     inc     ecx
     test    eax, eax
     jnz     .lp1
-    mov     eax, ecx 
+    mov     eax, ecx
 .lp2:
     pop     edx
     mov     [edi], dl
@@ -159,43 +122,51 @@ endp
 
 
 section '.data' data readable writeable
-    ustr0 szTestFile, 'test.asm'
-    
-    ustr0 msgStart, 'FASM AutoDocer Started...', 13, 10
-    ustr0 msgDone,  'Parsing Complete.', 13, 10
-    ustr0 msgFileError,  'File Error!!!', 13, 10
-    
-    cPos        dq 0
+    ustr0 szTestFile,    'test.asm'
+    ustr0 msgStart,      'FASM AutoDocer Started...', 13, 10
+    ustr0 msgParsing,    'Parsing...', 13, 10
+    ustr0 msgGenerating, 'Generating Wiki...', 13, 10
+    ustr0 msgDone,       'Done! Wiki written to output\', 13, 10
+    ustr0 msgFileError,  'File Error!', 13, 10
+    ustr0 msgParseError, 'Parse Error!', 13, 10
+    ustr0 msgGenError,   'Generator Error!', 13, 10
 
+    cPos    dq 0
+    charBuf rb 12
 
-TokenNames:
-    dd .t0, .t1, .t2, .t3, .t4, .t5, .t6, .t7, .t8, .t9
-    .t0 db 'ERR       ', 0
-    .t1 db 'OPEN_TYPE ', 0
-    .t2 db 'CLOSE_TYPE', 0
-    .t3 db 'OPEN_TAG  ', 0
-    .t4 db 'IDEN      ', 0
-    .t5 db 'CLOSE_TAG ', 0
-    .t6 db 'FREE_LINE ', 0
-    .t7 db 'SEMICOLON ', 0
-    .t8 db 'TEXT_TYPE ', 0
-    .t9 db 'TEXT_TAG  ', 0
+    ; generator string constants
+    szOutDir        db 'output\', 0
+    szHomeMd        db 'output\Home.md', 0
+    szSidebarMd     db 'output\_Sidebar.md', 0
+    szMdExt         db '.md', 0
+    szHomeHeader    db '# Documentation Index', 13, 10, 0
+    szSidebarHeader db '## Contents', 13, 10, 0
+    szH2            db '## ', 0
+    szBulletLink    db '* [', 0
+    szLinkMid       db '](',  0
+    szLinkEnd       db ')',   0
+    szBold          db '**',  0
+    szBoldEnd       db ':** ', 0
+    szHRule         db 13, 10, '---', 13, 10, 0
+    szNewline       db 13, 10, 0
+    szUnknown       db '(unknown)', 0
+    szTagName       db 'name'
 
-msgType  db 13, 10, '[Type: ', 0
-msgLen   db '] Len: ', 0
-msgText  db ' | Text: "', 0
-msgQuote db '"', 0
-charBuf  rb 12  
-    
+    fileBuf         rb 256   ; buffer for BuildFileName
+
     include 'lexer/Lexer.i.asm'
 
     pLenght     dq ?
     hHeap       dd ?
     hOutput     dd ?
     hFile       dd ?
+    hMapping    dd ?
+    pView       dd ?
+
+    docIR       DocIR        ; IR root node (zeroed by BSS rules)
 
 
 section '.idata' import data readable writeable
     library kernel32, 'KERNEL32.DLL'
-    
+
     include 'api/kernel32.inc'
