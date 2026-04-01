@@ -126,9 +126,12 @@ endl
     jnz @F
     inc edx
 @@:
-    invoke HeapFree, [hHeap], 0, eax
+    ; === РРЎРџР РђР’Р›Р•РќРР•: РїСЂРѕРІРµСЂСЏРµРј С‚РёРї Р”Рћ HeapFree, РёРЅР°С‡Рµ ecx/edx Р·Р°С‚РёСЂР°СЋС‚СЃСЏ ===
     cmp ecx, TOKEN_CLOSE_TYPE
-    jne .PopFail
+    jne .PopFailFree                ; С‚РёРї РЅРµ С‚РѕС‚ вЂ” РѕСЃРІРѕР±РѕР¶РґР°РµРј С‚РѕРєРµРЅ Рё РІС‹С…РѕРґРёРј
+    push edx                        ; СЃРѕС…СЂР°РЅСЏРµРј cRead (HeapFree РїРѕР±СЊС‘С‚ edx)
+    invoke HeapFree, [hHeap], 0, eax
+    pop edx                         ; РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµРј cRead
     add esi, edx
 
     invoke HeapAlloc, [hHeap], HEAP_ZERO_MEMORY, sizeof.DocBlock
@@ -174,6 +177,9 @@ endl
 .Fail:
     xor eax, eax
     jmp .EndProc
+.PopFailFree:
+    invoke HeapFree, [hHeap], 0, eax
+    jmp .PopFail
 .FreeTypeFail:
     invoke HeapFree, [hHeap], 0, eax
     xor eax, eax
@@ -278,9 +284,12 @@ endl
     jnz @F
     inc edx
 @@:
-    invoke HeapFree, [hHeap], 0, eax
+    ; === РРЎРџР РђР’Р›Р•РќРР•: РїСЂРѕРІРµСЂСЏРµРј С‚РёРї Р”Рћ HeapFree, РёРЅР°С‡Рµ ecx/edx Р·Р°С‚РёСЂР°СЋС‚СЃСЏ ===
     cmp ecx, TOKEN_CLOSE_TAG
-    jne .FreeIden
+    jne .FreeIdenAndToken           ; С‚РёРї РЅРµ С‚РѕС‚ вЂ” РѕСЃРІРѕР±РѕР¶РґР°РµРј РѕР±Р° С‚РѕРєРµРЅР°
+    push edx                        ; СЃРѕС…СЂР°РЅСЏРµРј cRead (HeapFree РїРѕР±СЊС‘С‚ edx)
+    invoke HeapFree, [hHeap], 0, eax
+    pop edx                         ; РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµРј cRead
     add esi, edx
 
     ; TagValue
@@ -312,6 +321,8 @@ endl
     mov eax, 1
     ret
 
+.FreeIdenAndToken:
+    invoke HeapFree, [hHeap], 0, eax    ; РѕСЃРІРѕР±РѕР¶РґР°РµРј С‚РѕРєРµРЅ Р·Р°РєСЂС‹РІР°СЋС‰РµРіРѕ С‚РµРіР°
 .FreeIden:
     invoke HeapFree, [hHeap], 0, [lIdenTok]
 .Fail:
