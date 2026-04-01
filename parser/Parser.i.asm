@@ -14,5 +14,8 @@
 ; Body = Field Body | e
 ; Field = TOKEN_OPEN_TAG TagName TOKEN_CLOSE_TAG TagValue 
 ; TagName = TOKEN_IDEN
-; TagValue = TEXT_TAG |
+; TagValue = TEXT_TAG TagValue | TOKEN_FREE_LINE TagValue | e
 
+lParsePos    dd 0   ; обновляется каждым ParseXxx
+lTagValStart dd 0   ; результат ParseTagValue: pStart
+lTagValLen   dd 0   ; результат ParseTagValue: cRead

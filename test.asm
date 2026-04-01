@@ -15,3 +15,25 @@ endp
 ; .tags:   vga, screen, io
 proc k_display_print
 endp
+
+; -----------------------------------------------------------
+; proc FreeIR
+; -----------------------------------------------------------
+; @[proc]
+; .parent:  Parser
+; .name:    FreeIR
+; .desc:    Walks IR linked list and frees all DocBlock nodes.
+; .in:      pIR -> pointer to DocIR
+; .out:     (none)
+proc FreeIR uses eax ecx, pIR
+    mov eax, [pIR]
+    mov eax, [eax + DocIR.pFirst]
+.Loop:
+    test eax, eax
+    jz .Done
+    mov ecx, [eax + DocBlock.pNext]
+    invoke HeapFree, [hHeap], 0, eax
+    mov eax, ecx
+    jmp .Loop
+.Done: ret
+endp

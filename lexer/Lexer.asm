@@ -34,6 +34,11 @@ endl
     jmp     .LoopTake
 
 .End:
+    cmp     byte [lState], TOKEN_ERR
+    jne     .AllocOk
+    xor     eax, eax
+    ret
+.AllocOk:
     invoke  HeapAlloc, [hHeap], 8, sizeof.Token
     
     mov     edx, [pStart]
@@ -117,7 +122,8 @@ endl
     
     lodsb
     movzx   eax, al
-    add     edx, [CharTable + eax]
+    movzx   eax, byte[CharTable + eax]
+    add     edx, eax
     
     movzx   ecx, byte [TokenTableTag + edx]
     test    ecx, ecx
