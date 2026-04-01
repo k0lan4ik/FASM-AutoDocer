@@ -1,28 +1,10 @@
 ; ============================================================
-;  Parser -- LL(1) recursive-descent, строго по таблице
-;
-;  Таблица LL(1):
-;  | Document  | TOKEN_OPEN_TYPE  -> Block Document
-;  | Document  | other / $        -> e
-;  | Block     | TOKEN_OPEN_TYPE  -> TOT TypeID TCT Body
-;  | TypeID    | TEXT_TYPE        -> TEXT_TYPE
-;  | Body      | TOKEN_OPEN_TAG   -> Field Body
-;  | Body      | other / $        -> e
-;  | Field     | TOKEN_OPEN_TAG   -> TOG TagName TCG TagValue
-;  | TagName   | TOKEN_IDEN       -> TOKEN_IDEN
-;  | TagValue  | TEXT_TAG         -> TEXT_TAG TagValue
-;  | TagValue  | TOKEN_FREE_LINE  -> TOKEN_FREE_LINE TagValue
-;  | TagValue  | other / $        -> e
-;
-;  Глобальные переменные (объявить в .data/.bss главного модуля):
-;    lParsePos    dd 0
-;    lTagValStart dd 0
-;    lTagValLen   dd 0
+;  Parser -- LL(1) recursive-descent
+;  DEBUG BUILD: token dump + AST dump enabled
 ; ============================================================
 
 ; -----------------------------------------------------------
 ; proc ParseDocument
-;   Document -> Block Document | Any Document | e
 ; -----------------------------------------------------------
 ; @[proc]
 ; .parent:  Parser
@@ -45,14 +27,17 @@ endl
     mov     dword [edi + DocIR.pFirst],     0
     mov     dword [edi + DocIR.blockCount], 0
 
+    invoke  WriteConsoleA, [hOutput], szDbgDocStart, szDbgDocStart.len, 0, 0
+
 .Loop:
     cmp     esi, [lEnd]
     jae     .Done
 
-    stdcall GetToken, esi           ; lookahead — не двигаем esi
+    stdcall GetToken, esi           ; lookahead
+    tok_dbg                         ; <-- dump lookahead token
     test    eax, eax
-    jz      .Done
-
+     jz      .Skip1        
+    
     movzx   ecx, byte [eax + Token.tType]
     mov     edx, [eax + Token.cRead]
     test    edx, edx
@@ -63,16 +48,20 @@ endl
     jne     .AnyDoc
 
     ; Document -> Block Document
-    invoke  HeapFree, [hHeap], 0, eax   ; освобождаем lookahead
+    invoke  HeapFree, [hHeap], 0, eax
     stdcall ParseBlock, esi, [lEnd], [pIR]
     test    eax, eax
     jz      .Fail
     mov     esi, [lParsePos]
     jmp     .Loop
 
-.AnyDoc:                                ; Document -> Any Document
+.AnyDoc:
     add     esi, edx
     invoke  HeapFree, [hHeap], 0, eax
+    jmp     .Loop
+
+.Skip1:                   
+    inc     esi            
     jmp     .Loop
 
 .Done:  mov eax, 1
@@ -92,8 +81,11 @@ locals
 endl
     mov     esi, [pPos]
 
+    invoke  WriteConsoleA, [hOutput], szDbgBlock, szDbgBlock.len, 0, 0
+
     ; consume TOKEN_OPEN_TYPE
     stdcall GetToken, esi
+    tok_dbg
     test eax, eax
     jz .Fail
     mov edx, [eax + Token.cRead]
@@ -106,6 +98,7 @@ endl
 
     ; TypeID -> TEXT_TYPE
     stdcall GetTypeToken, esi
+    tok_dbg
     test eax, eax
     jz .Fail
     movzx ecx, byte [eax + Token.tType]
@@ -124,6 +117,7 @@ endl
 
     ; consume TOKEN_CLOSE_TYPE
     stdcall GetToken, esi
+    tok_dbg
     test eax, eax
     jz .PopFail
     movzx ecx, byte [eax + Token.tType]
@@ -150,7 +144,7 @@ endl
     jz .BlockFail
     mov esi, [lParsePos]
 
-    ; прицепить к IR
+    ; attach to IR
     mov ebx, [lBlock]
     mov edi, [pIR]
     mov eax, [edi + DocIR.pFirst]
@@ -191,14 +185,17 @@ endp
 ; -----------------------------------------------------------
 ; proc ParseBody
 ;   Body -> Field Body | e
-;   Lookahead TOKEN_OPEN_TAG -> Field Body  /  else -> e
 ; -----------------------------------------------------------
 proc ParseBody uses esi, pPos, pEnd, pBlock
     mov esi, [pPos]
+
+    invoke  WriteConsoleA, [hOutput], szDbgBody, szDbgBody.len, 0, 0
+
 .Loop:
     cmp esi, [pEnd]
     jae .Done
     stdcall GetToken, esi
+    tok_dbg
     test eax, eax
     jz .Done
     movzx ecx, byte [eax + Token.tType]
@@ -209,10 +206,10 @@ proc ParseBody uses esi, pPos, pEnd, pBlock
 @@:
     cmp ecx, TOKEN_OPEN_TAG
     je .DoField
-    invoke HeapFree, [hHeap], 0, eax    ; Body -> e, не двигаем esi
+    invoke HeapFree, [hHeap], 0, eax    ; Body -> e
     jmp .Done
 .DoField:
-    invoke HeapFree, [hHeap], 0, eax    ; ParseField перечитает сам
+    invoke HeapFree, [hHeap], 0, eax
     stdcall ParseField, esi, [pEnd], [pBlock]
     test eax, eax
     jz .Fail
@@ -239,8 +236,11 @@ locals
 endl
     mov esi, [pPos]
 
+    invoke  WriteConsoleA, [hOutput], szDbgField, szDbgField.len, 0, 0
+
     ; consume TOKEN_OPEN_TAG
     stdcall GetToken, esi
+    tok_dbg
     test eax, eax
     jz .Fail
     mov edx, [eax + Token.cRead]
@@ -253,6 +253,7 @@ endl
 
     ; TagName -> TOKEN_IDEN
     stdcall GetToken, esi
+    tok_dbg
     test eax, eax
     jz .Fail
     movzx ecx, byte [eax + Token.tType]
@@ -268,6 +269,7 @@ endl
 
     ; consume TOKEN_CLOSE_TAG
     stdcall GetToken, esi
+    tok_dbg
     test eax, eax
     jz .FreeIden
     movzx ecx, byte [eax + Token.tType]
@@ -325,7 +327,6 @@ endp
 ; -----------------------------------------------------------
 ; proc ParseTagValue
 ;   TagValue -> TEXT_TAG TagValue | TOKEN_FREE_LINE TagValue | e
-;   Результат: [lTagValStart] / [lTagValLen] — первый TEXT_TAG
 ; -----------------------------------------------------------
 proc ParseTagValue uses esi ebx, pPos, pEnd
     mov esi, [pPos]
@@ -335,6 +336,7 @@ proc ParseTagValue uses esi ebx, pPos, pEnd
     cmp esi, [pEnd]
     jae .Done
     stdcall GetTagToken, esi
+    tok_dbg
     test eax, eax
     jz .Done
     movzx ecx, byte [eax + Token.tType]
@@ -347,7 +349,7 @@ proc ParseTagValue uses esi ebx, pPos, pEnd
     je .GotText
     cmp ecx, TOKEN_FREE_LINE
     je .SkipLine
-    invoke HeapFree, [hHeap], 0, eax    ; TagValue -> e, не двигаем esi
+    invoke HeapFree, [hHeap], 0, eax    ; TagValue -> e
     jmp .Done
 .GotText:
     cmp dword [lTagValStart], 0
@@ -390,4 +392,77 @@ proc FreeIR uses eax ecx, pIR
     mov eax, ecx
     jmp .Loop
 .Done: ret
+endp
+
+
+; -----------------------------------------------------------
+; proc DumpIR  -- РїРµС‡Р°С‚Р°РµС‚ AST РІ РєРѕРЅСЃРѕР»СЊ
+; -----------------------------------------------------------
+; .in:  pIR -> pointer to DocIR
+proc DumpIR uses eax ebx ecx edx esi, pIR
+locals
+    lFIdx   dd 0
+    lFCnt   dd 0
+endl
+    invoke  WriteConsoleA, [hOutput], szAstHeader, szAstHeader.len, 0, 0
+
+    mov     esi, [pIR]
+    test    esi, esi
+    jz      .Done
+    mov     esi, [esi + DocIR.pFirst]
+
+.BlockLoop:
+    test    esi, esi
+    jz      .Done
+
+    ; === [BLOCK] type=<name> ===
+    invoke  WriteConsoleA, [hOutput], szAstBlkHdr, szAstBlkHdr.len, 0, 0
+    mov     eax, [esi + DocBlock.cType]
+    test    eax, eax
+    jz      .NoType
+    invoke  WriteConsoleA, [hOutput], [esi + DocBlock.pType], \
+                           [esi + DocBlock.cType], 0, 0
+.NoType:
+    invoke  WriteConsoleA, [hOutput], szAstNL, 2, 0, 0
+
+    ; РїРѕР»СЏ
+    mov     dword [lFIdx], 0
+    mov     eax, [esi + DocBlock.fieldCount]
+    mov     [lFCnt], eax
+
+.FieldLoop:
+    mov     eax, [lFIdx]
+    cmp     eax, [lFCnt]
+    jge     .FieldsDone
+
+    imul    ecx, eax, sizeof.DocField
+    lea     ebx, [esi + DocBlock.fields + ecx]
+
+    ;   .name: value
+    invoke  WriteConsoleA, [hOutput], szAstFldPfx, 3, 0, 0
+    invoke  WriteConsoleA, [hOutput], [ebx + DocField.pName],  \
+                           [ebx + DocField.cName],  0, 0
+    invoke  WriteConsoleA, [hOutput], szAstFldSep, 2, 0, 0
+    mov     eax, [ebx + DocField.cValue]
+    test    eax, eax
+    jz      .NoVal
+    invoke  WriteConsoleA, [hOutput], [ebx + DocField.pValue], \
+                           [ebx + DocField.cValue], 0, 0
+    jmp     .AfterVal
+.NoVal:
+    invoke  WriteConsoleA, [hOutput], szAstNone, 6, 0, 0
+.AfterVal:
+    invoke  WriteConsoleA, [hOutput], szAstNL, 2, 0, 0
+
+    inc     dword [lFIdx]
+    jmp     .FieldLoop
+
+.FieldsDone:
+    invoke  WriteConsoleA, [hOutput], szAstDiv, szAstDiv.len, 0, 0
+    mov     esi, [esi + DocBlock.pNext]
+    jmp     .BlockLoop
+
+.Done:
+    mov     eax, 1
+    ret
 endp

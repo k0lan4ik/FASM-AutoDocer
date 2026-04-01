@@ -51,14 +51,11 @@ WinMain:
     test    eax, eax
     jz      .ParseFail
 
+    
+
     lea     eax, [docIR]
-
-; показать сколько блоков нашли
-mov     eax, [docIR + DocIR.blockCount]
-lea     edi, [charBuf]
-stdcall IntToStr, eax, edi
-invoke  WriteConsoleA, [hOutput], charBuf, 10, 0, 0
-
+    stdcall DumpIR, eax 
+    lea     eax, [docIR]       
     ; --- generate wiki ---
     invoke  WriteConsoleW, [hOutput], msgGenerating, msgGenerating.length, 0, 0
 
@@ -257,6 +254,28 @@ section '.data' data readable writeable
     szTagName       db 'name'
 
     fileBuf         rb 256   ; buffer for BuildFileName
+
+    ; --- parser debug labels ---
+    szDbgDocStart   db 13,10,'=== ParseDocument ===',13,10
+    .len = $ - szDbgDocStart
+    szDbgBlock      db '--- ParseBlock ---',13,10
+    .len = $ - szDbgBlock
+    szDbgBody       db '  > ParseBody',13,10
+    .len = $ - szDbgBody
+    szDbgField      db '    > ParseField',13,10
+    .len = $ - szDbgField
+
+    ; --- AST dump labels ---
+    szAstHeader     db 13,10,'======= AST DUMP =======',13,10
+    .len = $ - szAstHeader
+    szAstBlkHdr     db '[BLOCK] type='
+    .len = $ - szAstBlkHdr
+    szAstFldPfx     db '  .'            ; 3 bytes, no null needed
+    szAstFldSep     db ': '             ; 2 bytes
+    szAstNone       db '(none)'         ; 6 bytes
+    szAstNL         db 13,10            ; 2 bytes
+    szAstDiv        db '------------------------',13,10
+    .len = $ - szAstDiv
 
     include 'lexer/Lexer.i.asm'
     include 'parser/Parser.i.asm'
